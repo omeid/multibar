@@ -15,6 +15,11 @@ import (
 type progressFunc func(progress int)
 
 type BarContainer struct {
+	*barContainer
+	prefix string
+}
+
+type barContainer struct {
 	Bars []*ProgressBar
 
 	screenLines   int
@@ -38,6 +43,7 @@ type ProgressBar struct {
 	ShowTimeElapsed bool
 	StartTime       time.Time
 	Line            int
+	prefix          string
 	Prepend         string
 
 	progressChan chan int
@@ -50,12 +56,16 @@ func New() (*BarContainer, error) {
 
 	history := make(map[int]string)
 
-	b := &BarContainer{screenWidth: width, screenLines: lines, startingLine: line, history: history}
+	b := &barContainer{screenWidth: width, screenLines: lines, startingLine: line, history: history}
 	// todo: need to figure out a way to deal with additional progressbars while the listener
 	// is listening. for the time being, the calling app will have to call listen after
 	// all bars are declared
 	//go b.Listen()
-	return b, nil
+	return &BarContainer{b, ""}, nil
+}
+
+func (b *BarContainer) New(prefix string) *BarContainer {
+	return &BarContainer{b.barContainer, b.prefix + prefix}
 }
 
 func (b *BarContainer) Listen() {
@@ -86,8 +96,9 @@ func (b *BarContainer) Listen() {
 func (b *BarContainer) MakeBar(total int, prepend string) progressFunc {
 	ch := make(chan int)
 	bar := &ProgressBar{
-		Width:           b.screenWidth - len(prepend) - 20,
+		Width:           b.screenWidth - len(prepend) - len(b.prefix) - 20,
 		Total:           total,
+		prefix:          b.prefix,
 		Prepend:         prepend,
 		LeftEnd:         '[',
 		RightEnd:        ']',
@@ -157,7 +168,7 @@ func (p *ProgressBar) Update(progress int) {
 	c, _ := curse.New()
 	c.Move(1, p.Line)
 	c.EraseCurrentLine()
-	fmt.Printf("\r%s %s%c%s%c%s", p.Prepend, percent, p.LeftEnd, strings.Join(bar, ""), p.RightEnd, timeElapsed)
+	fmt.Printf("\r%s%s %s%c%s%c%s", p.prefix, p.Prepend, percent, p.LeftEnd, strings.Join(bar, ""), p.RightEnd, timeElapsed)
 	c.Move(c.StartingPosition.X, c.StartingPosition.Y)
 }
 
@@ -211,8 +222,9 @@ func (b *BarContainer) Print(a ...interface{}) (n int, err error) {
 	newlines := countAllNewlines(a...)
 	b.addedNewlines(newlines)
 	thisLine := b.startingLine + b.totalNewlines
-	b.history[thisLine] = fmt.Sprint(a...)
-	return fmt.Print(a...)
+	raw := b.prefix + fmt.Sprint(a...)
+	b.history[thisLine] = raw
+	return fmt.Print(raw)
 }
 
 func (b *BarContainer) Printf(format string, a ...interface{}) (n int, err error) {
@@ -222,6 +234,8 @@ func (b *BarContainer) Printf(format string, a ...interface{}) (n int, err error
 	newlines += countAllNewlines(a...)
 	b.addedNewlines(newlines)
 	thisLine := b.startingLine + b.totalNewlines
+
+	format = b.prefix + format
 	b.history[thisLine] = fmt.Sprintf(format, a...)
 	return fmt.Printf(format, a...)
 }
@@ -232,8 +246,10 @@ func (b *BarContainer) Println(a ...interface{}) (n int, err error) {
 	newlines := countAllNewlines(a...) + 1
 	b.addedNewlines(newlines)
 	thisLine := b.startingLine + b.totalNewlines
-	b.history[thisLine] = fmt.Sprint(a...)
-	return fmt.Println(a...)
+
+	raw := b.prefix + fmt.Sprint(a...)
+	b.history[thisLine] = raw
+	return fmt.Println(raw)
 }
 
 func countAllNewlines(interfaces ...interface{}) int {
